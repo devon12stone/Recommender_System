@@ -1,0 +1,264 @@
+---
+title: 'STA5073Z DS for Industry Assignment 1: Recommender Systems'
+author: "Created by Devon Stone (STNDEV002)"
+date: "29/08/2018"
+output:
+  html_document:
+    df_print: paged
+  '': default
+  pdf_document: default
+---
+
+___
+ 
+```{r setup, include=FALSE,cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objectives of the Assignment: 
+
+The aim of this assignment was to create three recommender systems that provide recommendations for which books would be suited to particular readers. The systems had to be able to produce recommendations for readers in the dataset and new/unseen readers. The systems were based on each of the following:
+
+* user-based collaborative filtering
+* item-based collaborative filtering
+* matrix factorization.
+
+After the creation of the three recommender systems, the accuracy of the matrix factorization recommender system then had to be assessed. Then the performance of the matrix factorization recommender system was used to assess the influence of adding L2 regularization and bias to a recommender system. 
+
+Finally, an R package was created that contained the R functions and their documentation that were built throughout the course of the assignment. All the functions created for this assignment were designed in such a way that they were generalisable for any future dataset. All functions created for the assignment can be found in the 'SteveDone' package attahced to this assignment under the R folder. The R package for this assignment was created using the 'devtools' library, while the documentation for each function was created using the 'roxygen2' library. 
+___
+
+## Loading Required Packages and Dataset
+
+The first step in the assignment was to load the R packages required to create the recommender systems and the final R Package. The second was to load the dataset and explore the three R objects within the dataset. 
+
+
+```{r}
+# set random seed
+set.seed(1)
+
+# load packages
+library(tidyverse)
+library(NNLM)
+library(dplyr)
+
+
+# User created package
+library(SteveDone)
+```
+
+```{r}
+# load data
+# data contains 3 objects: book_info, book_ratings and user_info
+data <- load('book_ratings.Rdata')
+```
+## Data Exploration and Manipulation
+
+The first R object contains a unique ID for each book reviewed, the title of each book and the book's author. 
+```{r}
+head(book_info)
+```
+
+Each row of the second R object represents a book rating. Each row contains an ID for the reader, the book and then the rating the reader gave the book.
+
+```{r}
+head(book_ratings)
+```
+
+The third R object contains a unique ID for each reader in the system and their age. 
+
+```{r}
+head(user_info)
+```
+
+We first needed to remove the zero ratings from the dataset. Zero ratings represented when a reader had read a book but not rated it. The scale of the book ratings was from 0 - 10. The recommender systems would have seen zero ratings as a worst possible rating, rather than just no rating at all. Therefore, the zero ratings were removed. 
+
+The book_ratings dataframe was reduced from 45483 observations to 18317 observations when the zero ratings were removed. 
+```{r}
+# removing the zero ratings using the remove_zero_ratings built funciton
+book_ratings <- remove_zero_ratings(book_ratings, 'Book.Rating')
+dim(book_ratings)
+```
+
+Before continuing we needed to convert the book_ratings dataframe, shown above, into matrix form where rows represent readers and columns the different books reviewed. 
+
+```{r}
+# make a spread matrix from the book_ratings dataframe using the make_spread_matrix built funciton
+book_ratings_matrix <- make_spread_matrix(book_ratings,'User.ID', 'ISBN', 'Book.Rating')
+```
+
+We needed to set the NA values in the dataframe above to equal zero. This is for the similarity matrix which be explained later.
+
+```{r}
+# set na values to zero using the na_to_zero built funciton
+book_ratings_matrix <- na_to_zero(book_ratings_matrix)
+head(book_ratings_matrix)
+```
+
+## User-based collaborative filtering
+
+The first of the systems built was the user-based collaborative filtering system. This system recommends books to a reader by attaching a higher weight to the votes of readers that are more similar to the reader receiving the recommendation. In the case of this assignment similarity is a measure of the number of books that two users being assessed have both read. Similarity can be measured in numerous ways such as Pearson correlation, Jaccard similarity and mean squared differences. In the case of this system Cosine similarity was used, which is the most commonly method for measuring similarity. 
+
+The first step in building the user-based collaborative filtering was to create a function that calculates the pairwise-similarity between two users. This function was created and can been found in the 'SteveDone' package under the name 'cosine_sim.R'. 
+
+There was no reason to create an entire similarity matrix in the case of this assignment as it was only necessary to return the recommendations for a single user. The entire similarity matrix would have been a very memory intensive 7503 by 7503 (7503 being the number of unique readers) matrix. Instead, the similarities between a reader in question and all other readers were calculated only when the recommendations of the reader in question were required. This step was completed using the function all_sim which can be found in the 'SteveDone' package under the name 'all_sim.R'. 
+
+#### User Ratings
+
+A user based rating function was created in order to return the top 10 books linked to a specific user. The 'cosine_sim' and 'all_sim.R' functions are called within the user based rating function. The user based rating function can be found in the 'SteveDone' package under 'user_based_rating.R'. 
+
+```{r}
+# function for returning the top ten books for a user in the dataset.
+# this returns the top ten books for user 277042
+user_based_rating(277042, book_ratings_matrix, book_info)
+```
+
+
+#### New User Ratings
+
+In order to return ratings for new users another function was created. This function first added the new user's ratings to the spread matrix calculated above. Then called the 'user_based_rating' function to return the top 10 books for the new user.
+
+The function used to add and rate new user's can be seen in the 'SteveDone' package under 'new_user_user_based.R'. 
+
+```{r}
+# first create a new user
+# must be in the form of a dataframe.
+# must be books read and then there ratings
+new_user <- data.frame(ISBN= c('0440234743', '0971880107', '0345417623'), Book.Rating = c(2, 5, 3))
+
+# then call the function where the new user's dataframe is used as a parameter. 
+new_user_user_based(new_user, book_ratings_matrix, book_info,'ISBN','Book.Rating')
+```
+
+## Item-based collaborative filtering
+
+The second of the systems built was the item-based collaborative filtering system. This system recommends books to a reader that are similar to the books that the reader has already read. Therefore, in this system similarities are calculated between books and not readers.
+
+The cosine_sim and all_sim fucntions did not have to be changed in order to calculate similarity of books. The only thing that was neccessary was to transpose the book ratings matrix.
+
+In the case of the item based filtering it made sense to store the similarity matrix as the matrix was only 150 books by 150 books and therefore for less memory intensive.
+
+```{r}
+# function to create book similarity matrix
+book_similarities <- sim_matrix(t(book_ratings_matrix), t(book_ratings_matrix))
+```
+
+#### User Ratings
+
+The fucntion below was created to recommend the top ten books for a reader already contained within the dataset using item-based collaborative filtering.
+
+```{r}
+# function for item based rating of current user
+item_based_rating(277042, book_ratings_matrix, book_info, book_similarities)
+```
+
+
+#### New User Ratings
+
+The fucntion below was created to recommend the top ten books for a new reader. The new reader is also added to the dataset by this function.  
+
+```{r}
+new_user <- data.frame(ISBN= c('0440234743', '0971880107', '0345417623'), Book.Rating = c(2, 5, 3))
+new_user_item_based(new_user, book_ratings_matrix, book_info, book_similarities, 'ISBN', 'Book.Rating')
+```
+
+#### Comparison
+
+We can see that for user "277042" that the user based and item based systems recommended eight of the same books. This was a good sign in terms of system validity for both systems. 
+
+## Collaborative filtering with matrix factorization
+
+The third and final system created involved using matrix factorization (decomposition). Matrix factorisation was used to decompose the ratings matrix into the product of two matrices. When the two matrices are then multiplied the final matrix produced has no blank ratings, this is the power of the matrix factorization method. 
+
+For this section the zero ratings in the ratings dataframe had to appear as NA values in a spread matrix. To do this, the 'make_spread_matrix' was recalled.
+
+
+```{r}
+set.seed(42)
+book_ratings <- remove_zero_ratings(book_ratings, 'Book.Rating')
+book_ratings_matrix <- make_spread_matrix(book_ratings,'User.ID', 'ISBN', 'Book.Rating')
+```
+
+#### Test/Validation Set
+
+The next step of the assignment involved creating a test/validation set for the rating system. This was done by randomly assigning two ratings to 'NA', for users that have more than three ratings in the system. The ratings that were set to 'NA' were then stored and compared to the predicted ratings that were calculated as a result of the matrix decomposition. This allowed a RMSE to be calculated for the system which was then used to find the most appropriate value for the matrix decomposition rank. 
+
+The first step in getting the validation set was to get a count of ratings for each user. The second step was to set two of the known ratings for users with more than three ratings to 'NA'. Finally, a matrix was returned containing the user ID's, indices of the known ratings that were set to 'NA' and their original values. 
+
+The function 'get_test_set' was created to complete what is mentioned above, the code and logic can be seen in the R folder in the file 'get_test_set.R'. 
+```{r}
+# matrix with user ID's, indices of the known ratings that were set to 'NA' and their original values.
+changed_inds <- get_test_set(book_ratings,'User.ID', 'ISBN', 'Book.Rating')
+head(changed_inds)
+```
+
+#### Parameter Tuning
+
+After creating a training set the next step was to create a function that uses collaborative filtering with matrix factorization to make ratings predictions and return the RMSE of the system. The function can be viewed in the 'matrix_decomp.R' file in the R folder attached to this assignment.
+
+After creating the 'matrix_decomp' function the optimal integer decomposition rank of the decomposition matrix and L2 regularisation parameters for the matrix decomposition were identified using for loops. The integer decomposition rank of the matrix is the number of columns/rows of latent factors. Latent factors can be used to cluster items and users into categories, this was not investigated in this assignment. The physical matrix decomposition completed throughout this assignment was completed using the 'NNLM' package.
+
+
+```{r}
+rmse_list <- NULL
+
+for (i in 1:5) {
+  # call matrix_decomp using book_ratings, changed_inds and where k changes
+  decomp <- matrix_decomp(book_ratings, changed_inds,i,'User.ID', 'ISBN', 'Book.Rating', 0.2,0.2)
+
+  rmse <-  decomp$rmse
+  
+  rmse_list <- c(rmse_list, rmse)
+}
+
+plot(x=1:5,
+     y=rmse_list,
+     type="l",
+     xlab = "k",
+     ylab = "Test Set RMSE Value",
+     main = "Plot of k vs Test RMSE")
+
+```
+
+We can see from the plot above the K value which lead to smallest RMSE value was 5. In order to find the most suitable value for L2 regularisation parameters the following loop was run. 
+
+```{r}
+reg_rmse_list <- NULL
+
+for (i in seq(0, 1, by=0.1)) {
+  
+  decomp <- matrix_decomp(book_ratings, changed_inds,1,'User.ID', 'ISBN', 'Book.Rating', i,i)
+
+  rmse <- decomp$rmse
+  
+  reg_rmse_list <- c(reg_rmse_list, rmse)
+}
+
+plot(x=seq(0, 1, by=0.1),
+     y=reg_rmse_list,
+     type="l",
+     xlab='Value of Regularization Parameter',
+     ylab='Test Set RMSE Value',
+     main = "Plot of  Regularization Parameter vs Test RMSE")
+```
+
+
+The scale on the plot above is misleading, it makes it appear as if L2 regularisation resulted in RMSE increasing, but regularisation actually had very little effect on the RMSE of the recommender system. The most approproate L2 factor wasd found to be 0.2. 
+
+#### User Functions
+
+The final steps required for the assignment were to create functions to return the top 10 recommended books for users in the system and new users. The functions were created and the results can be seen below. 
+
+```{r}
+# have to call the get_test_set function to add the chnaged inidcies in order to get a test RMSE for the system 
+# this has been called above
+# us the optimal params for ratings
+
+facto_based_rating(277042 ,book_ratings, changed_inds,5,'User.ID', 'ISBN', 'Book.Rating', 0.2,0.2, book_info)
+```
+
+We can see from the books shown above that there is no overlap between the books recommended by this system and the other two systems. Adding bais could potentially make the ratings produced by this system align more with the other systems, but unfortunately that was not done for this assignment.  
+
+
+
+
